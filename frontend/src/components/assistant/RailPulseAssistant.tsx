@@ -25,6 +25,8 @@ export const RailPulseAssistant: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [audioPlayingId, setAudioPlayingId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [language, setLanguage] = useState('auto');
+  const [preferredTtsLanguage, setPreferredTtsLanguage] = useState('hi-IN');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -38,6 +40,57 @@ export const RailPulseAssistant: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
+
+  useEffect(() => {
+    return () => {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  const speakAssistantMessage = async (msg: Message) => {
+    try {
+      if (!msg.text) return;
+
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
+
+      let audioB64 = msg.audioBase64;
+
+      if (!audioB64) {
+        const ttsRes = await getSarvamTTS(msg.text, preferredTtsLanguage);
+        audioB64 = ttsRes.audio_base64;
+        msg.audioBase64 = audioB64;
+      }
+
+      if (!audioB64) return;
+
+      const audio = new Audio(`data:audio/mp3;base64,${audioB64}`);
+      currentAudioRef.current = audio;
+      setAudioPlayingId(msg.id);
+
+      audio.onended = () => {
+        setAudioPlayingId(null);
+        currentAudioRef.current = null;
+      };
+
+      audio.onerror = () => {
+        setAudioPlayingId(null);
+        currentAudioRef.current = null;
+        setAudioError('Unable to play audio stream');
+      };
+
+      await audio.play();
+    } catch {
+      setAudioPlayingId(null);
+      currentAudioRef.current = null;
+      setAudioError('Text-to-speech is currently unavailable');
+    }
+  };
 
   const handleSend = async (textToSend?: string) => {
     const query = (textToSend || input).trim();
@@ -56,16 +109,19 @@ export const RailPulseAssistant: React.FC = () => {
     setAudioError(null);
 
     try {
-      const data = await askSarvamAssistant(query);
+      const data = await askSarvamAssistant(query, language);
       const assistantMsg: Message = {
         id: `a-${Date.now()}`,
         sender: 'assistant',
         text: data.response,
         trainNumber: data.train_number,
-        audioBase64: data.audio_base64,
+        audioBase64: data.audio_base64 || null,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages(prev => [...prev, assistantMsg]);
+      if (assistantMsg.audioBase64) {
+        void speakAssistantMessage(assistantMsg);
+      }
     } catch (err: any) {
       const errorMsg: Message = {
         id: `err-${Date.now()}`,
@@ -80,40 +136,14 @@ export const RailPulseAssistant: React.FC = () => {
   };
 
   const handlePlayAudio = async (msg: Message) => {
-    try {
-      if (currentAudioRef.current) {
-        currentAudioRef.current.pause();
-        currentAudioRef.current = null;
-        if (audioPlayingId === msg.id) {
-          setAudioPlayingId(null);
-          return;
-        }
-      }
-
-      let audioB64 = msg.audioBase64;
-      if (!audioB64) {
-        setLoading(true);
-        const ttsRes = await getSarvamTTS(msg.text, 'hi-IN');
-        audioB64 = ttsRes.audio_base64;
-        msg.audioBase64 = audioB64;
-        setLoading(false);
-      }
-
-      if (audioB64) {
-        const audio = new Audio(`data:audio/mp3;base64,${audioB64}`);
-        currentAudioRef.current = audio;
-        setAudioPlayingId(msg.id);
-        audio.onended = () => setAudioPlayingId(null);
-        audio.onerror = () => {
-          setAudioPlayingId(null);
-          setAudioError('Unable to play audio stream');
-        };
-        await audio.play();
-      }
-    } catch (e) {
+    if (audioPlayingId === msg.id) {
+      currentAudioRef.current?.pause();
+      currentAudioRef.current = null;
       setAudioPlayingId(null);
-      setAudioError('Text-to-speech is currently unavailable');
+      return;
     }
+
+    await speakAssistantMessage(msg);
   };
 
   const startVoiceRecording = async () => {
@@ -152,6 +182,9 @@ export const RailPulseAssistant: React.FC = () => {
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             };
             setMessages(prev => [...prev, assistantMsg]);
+            if (assistantMsg.audioBase64) {
+              void speakAssistantMessage(assistantMsg);
+            }
           } catch {
             setAudioError('Could not process speech. Please type your query.');
           } finally {
@@ -320,6 +353,30 @@ export const RailPulseAssistant: React.FC = () => {
         >
           {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         </button>
+
+        <select
+          value={language}
+          onChange={(e) => {
+            const nextLanguage = e.target.value;
+            setLanguage(nextLanguage);
+            setPreferredTtsLanguage(nextLanguage === 'auto' ? 'hi-IN' : nextLanguage);
+          }}
+          aria-label="Assistant language"
+          className="h-9 w-[92px] shrink-0 rounded-lg border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500"
+        >
+          <option value="auto">Auto</option>
+          <option value="en-IN">English</option>
+          <option value="hi-IN">हिन्दी</option>
+          <option value="bn-IN">বাংলা</option>
+          <option value="gu-IN">ગુજરાતી</option>
+          <option value="kn-IN">ಕನ್ನಡ</option>
+          <option value="ml-IN">മലയാളം</option>
+          <option value="mr-IN">मराठी</option>
+          <option value="od-IN">ଓଡ଼ିଆ</option>
+          <option value="pa-IN">ਪੰਜਾਬੀ</option>
+          <option value="ta-IN">தமிழ்</option>
+          <option value="te-IN">తెలుగు</option>
+        </select>
 
         <input
           type="text"
