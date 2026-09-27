@@ -17,27 +17,41 @@ from app.models.database_models import ETAPrediction, TrainPosition, RouteStop, 
 
 # Import ML predictor with fallback
 _predictor = None
-try:
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-    from ml.predict import ETAPredictor
-    model_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'ml', 'model', 'eta_model.joblib')
-    _predictor = ETAPredictor(model_path)
-    if _predictor.is_model_loaded():
-        print("[ETA Service] ML model loaded successfully.")
-    else:
-        print("[ETA Service] ML model not found. Using fallback predictions.")
-except Exception as e:
-    print(f"[ETA Service] ML predictor not available: {e}. Using fallback.")
+_predictor_load_attempted = False
+
+def _load_predictor():
+    """Load the ML predictor lazily so FastAPI startup stays lightweight."""
+    global _predictor, _predictor_load_attempted
+    if _predictor_load_attempted:
+        return _predictor
+    _predictor_load_attempted = True
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+        from ml.predict import ETAPredictor
+        model_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'ml', 'model', 'eta_model.joblib')
+        _predictor = ETAPredictor(model_path)
+        print("[ETA Service] ML model loaded on first prediction request." if _predictor.is_model_loaded() else "[ETA Service] ML model not found. Using fallback predictions.")
+    except Exception as e:
+        print(f"[ETA Service] ML predictor not available: {e}. Using fallback.")
+        _predictor = None
+    return _predictor
 
 
 class ETAService:
     """Service for calculating dynamic ETA predictions."""
 
     def __init__(self):
-        self.predictor = _predictor
+        self.predictor = None
+
+    def _ensure_predictor(self):
+        """Load the ML predictor only when an ETA operation needs it."""
+        if self.predictor is None:
+            self.predictor = _load_predictor()
+        return self.predictor
 
     def is_ml_available(self) -> bool:
-        return self.predictor is not None and self.predictor.is_model_loaded()
+        predictor = self._ensure_predictor()
+        return predictor is not None and predictor.is_model_loaded()
 
     async def calculate_all_upcoming_etas(self, train_id: str) -> List[dict]:
         """Calculate ETAs for all upcoming stations for a train."""
