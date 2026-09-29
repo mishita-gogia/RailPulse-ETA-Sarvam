@@ -1,8 +1,18 @@
-"""Async SQLAlchemy database setup."""
+"""
+Async SQLAlchemy database setup.
 
+RETAINED EXCLUSIVELY FOR HISTORICAL MIGRATION TOOLING AND TEST COMPATIBILITY.
+No production runtime code imports or uses this module.
+"""
+
+import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
-from app.config import settings
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "sqlite+aiosqlite:///./railpulse.db"
+)
 
 
 class Base(DeclarativeBase):
@@ -10,9 +20,9 @@ class Base(DeclarativeBase):
 
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in settings.DATABASE_URL else {},
+    connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in DATABASE_URL else {},
 )
 
 async_session_maker = async_sessionmaker(
@@ -22,13 +32,7 @@ async_session_maker = async_sessionmaker(
 )
 
 
-async def get_db():
-    """Dependency for getting async database session."""
-    async with async_session_maker() as session:
-        yield session
-
-
 async def init_db():
-    """Initialize database tables."""
+    """Initialize database tables for migration scripts and test runners."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

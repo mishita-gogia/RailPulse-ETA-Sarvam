@@ -1,9 +1,7 @@
 """Authentication API endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.db import get_db
 from app.services.auth_service import auth_service
 from app.models.auth_schemas import (
     RegisterRequest,
@@ -47,11 +45,10 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 async def register(
     data: RegisterRequest,
     response: Response,
-    session: AsyncSession = Depends(get_db),
 ):
     """Register a new passenger account."""
     # Check for existing user
-    existing = await auth_service.get_user_by_phone(session, data.phone)
+    existing = await auth_service.get_user_by_phone(phone=data.phone)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -60,7 +57,6 @@ async def register(
 
     # Create user - explicitly enforce PASSENGER role
     user = await auth_service.create_user(
-        session=session,
         name=data.name,
         phone=data.phone,
         password=data.password,
@@ -74,6 +70,7 @@ async def register(
     return AuthResponse(
         message="Registration successful",
         user=_user_response(user),
+        access_token=token,
     )
 
 
@@ -81,10 +78,9 @@ async def register(
 async def login(
     data: LoginRequest,
     response: Response,
-    session: AsyncSession = Depends(get_db),
 ):
     """Login with phone and password."""
-    user = await auth_service.get_user_by_phone(session, data.phone)
+    user = await auth_service.get_user_by_phone(phone=data.phone)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -103,6 +99,7 @@ async def login(
     return AuthResponse(
         message="Login successful",
         user=_user_response(user),
+        access_token=token,
     )
 
 

@@ -1,22 +1,16 @@
 services:
-  # FastAPI backend + prebuilt SQLite/real-train catalog.
-  # The database is generated during the Render build using the 8 GB
-  # Starter build pipeline, then loaded by the 512 MB Free runtime.
   - type: web
     name: railpulse-eta-sih27-api
     runtime: python
     plan: free
     region: singapore
-    buildCommand: >-
-      pip install -r backend/requirements.txt &&
-      cd backend &&
-      python -c "import asyncio; from app.database.db import init_db; from app.database.seed import seed_db; asyncio.run(init_db()); asyncio.run(seed_db())"
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     autoDeployTrigger: commit
     envVars:
-      - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./railpulse.db
+      - key: PIP_DEFAULT_TIMEOUT
+        value: "100"
       - key: DEMO_MODE
         value: "true"
       - key: SIMULATION_INTERVAL

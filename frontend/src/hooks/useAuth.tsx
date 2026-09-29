@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import axios from 'axios';
+import { setAuthToken, getAuthToken } from '../services/api';
 
 export interface AuthUser {
   id: number;
@@ -36,6 +37,14 @@ const authApi = axios.create({
   withCredentials: true,  // Send cookies
 });
 
+authApi.interceptors.request.use((config) => {
+  const token = getAuthToken();
+  if (token && !config.headers['Authorization']) {
+    config.headers['Authorization'] = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +68,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (phone: string, password: string) => {
     try {
       const res = await authApi.post('/auth/login', { phone, password });
+      if (res.data.access_token) {
+        setAuthToken(res.data.access_token);
+      }
       setUser(res.data.user);
       return { success: true, role: res.data.user.role as string };
     } catch (err: any) {
@@ -70,6 +82,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = async (data: RegisterData) => {
     try {
       const res = await authApi.post('/auth/register', data);
+      if (res.data.access_token) {
+        setAuthToken(res.data.access_token);
+      }
       setUser(res.data.user);
       return { success: true };
     } catch (err: any) {
@@ -91,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Even if the server call fails, clear local state
     }
+    setAuthToken(null);
     setUser(null);
   };
 

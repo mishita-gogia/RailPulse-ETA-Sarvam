@@ -59,6 +59,7 @@ class UserResponse(BaseModel):
 class AuthResponse(BaseModel):
     message: str
     user: UserResponse
+    access_token: Optional[str] = None
 
 
 class MessageResponse(BaseModel):

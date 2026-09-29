@@ -94,6 +94,41 @@ class SarvamService:
             fallback = self._build_template_fallback(user_message, railpulse_context)
             return fallback, "en"
 
+    def translate_text(
+        self,
+        text: str,
+        target_language_code: str,
+        source_language_code: str = "auto",
+    ) -> Optional[str]:
+        """Translate text into target Indian language using Sarvam Translate.
+
+        Preserves international numerals (train numbers, delays, times).
+        """
+        if not self.is_available():
+            return None
+
+        clean = text.strip()
+        if not clean:
+            return ""
+
+        # English to English requires no translation
+        if target_language_code in ("en-IN", "en"):
+            return clean
+
+        try:
+            res = self.client.text.translate(
+                input=clean[:1000],
+                source_language_code=source_language_code,
+                target_language_code=target_language_code,
+                numerals_format="international",
+            )
+            if res and hasattr(res, "translated_text") and res.translated_text:
+                return res.translated_text.strip()
+            return None
+        except Exception as e:
+            logger.warning(f"[SarvamService] Translation failed: {type(e).__name__}: {e}")
+            return None
+
     def synthesize_speech(
         self,
         text: str,
@@ -108,7 +143,7 @@ class SarvamService:
 
         # Supported language codes: 'en-IN', 'hi-IN', 'bn-IN', 'ta-IN', 'te-IN', etc.
         valid_lang = language_code if language_code in [
-            "en-IN", "hi-IN", "bn-IN", "ta-IN", "te-IN", "gu-IN", "kn-IN", "ml-IN", "mr-IN", "pa-IN"
+            "en-IN", "hi-IN", "bn-IN", "ta-IN", "te-IN", "gu-IN", "kn-IN", "ml-IN", "mr-IN", "pa-IN", "od-IN"
         ] else "hi-IN"
 
         try:

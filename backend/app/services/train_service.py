@@ -2,12 +2,8 @@
 
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
-from sqlalchemy import select, or_, func
-from app.database.db import async_session_maker
-from app.models.database_models import (
-    Train, TrainPosition, RouteStop, ETAPrediction, Alert
-)
 from app.adapters.train_data_source import DemoTrainDataSource, RealTrainDataSource
+from app.database.mongodb import get_mongo_db, COLL_ALERTS, COLL_TRAIN_POSITIONS, COLL_ETA_PREDICTIONS
 
 demo_source = DemoTrainDataSource()
 real_source = RealTrainDataSource()
@@ -112,60 +108,53 @@ class TrainService:
         return await real_source.get_route(train_id)
 
     async def get_train_history(self, train_id: str) -> List[dict]:
-        """Get ETA prediction history for a train."""
-        async with async_session_maker() as session:
-            result = await session.execute(
-                select(ETAPrediction)
-                .where(ETAPrediction.train_id == train_id)
-                .order_by(ETAPrediction.created_at.desc())
-                .limit(50)
-            )
-            predictions = result.scalars().all()
+        """Get ETA prediction history for a train from MongoDB."""
+        db = get_mongo_db()
+        if db is None:
+            raise RuntimeError("MongoDB is unavailable")
 
-            return [
-                {
-                    "station_code": p.station_code,
-                    "station_name": p.station_name,
-                    "scheduled_arrival": p.scheduled_arrival,
-                    "predicted_arrival": p.predicted_arrival,
-                    "predicted_delay_minutes": p.predicted_delay_minutes,
-                    "confidence": p.confidence,
-                    "confidence_level": p.confidence_level,
-                    "created_at": p.created_at.isoformat() if p.created_at else "",
-                }
-                for p in predictions
-            ]
+        cursor = db[COLL_ETA_PREDICTIONS].find(
+            {"train_id": train_id}
+        ).sort("created_at", -1).limit(50)
+        docs = await cursor.to_list(length=50)
+        return [
+            {
+                "station_code": d.get("station_code", ""),
+                "station_name": d.get("station_name", ""),
+                "scheduled_arrival": d.get("scheduled_arrival", ""),
+                "predicted_arrival": d.get("predicted_arrival", ""),
+                "predicted_delay_minutes": d.get("predicted_delay_minutes"),
+                "confidence": d.get("confidence"),
+                "confidence_level": d.get("confidence_level", ""),
+                "created_at": d["created_at"].isoformat() if isinstance(d.get("created_at"), datetime) else str(d.get("created_at", "")),
+            }
+            for d in docs
+        ]
 
     async def get_kpis(self) -> dict:
-        """Get dashboard KPI metrics."""
-        async with async_session_maker() as session:
-            positions_result = await session.execute(select(TrainPosition))
-            positions = positions_result.scalars().all()
+        """Get dashboard KPI metrics from MongoDB."""
+        db = get_mongo_db()
+        if db is None:
+            raise RuntimeError("MongoDB is unavailable")
 
-            total = len(positions)
-            on_time = sum(1 for p in positions if p.status == "On Time")
-            delayed = sum(1 for p in positions if p.status in ("Delayed", "Slight Delay"))
-            critical = sum(1 for p in positions if p.status == "Critical Delay")
-            avg_delay = sum(p.delay_minutes for p in positions) / max(1, total)
+        mongo_positions = await db[COLL_TRAIN_POSITIONS].find({}).to_list(length=100)
+        total = len(mongo_positions)
+        on_time = sum(1 for p in mongo_positions if p.get("status") == "On Time")
+        delayed = sum(1 for p in mongo_positions if p.get("status") in ("Delayed", "Slight Delay"))
+        critical = sum(1 for p in mongo_positions if p.get("status") == "Critical Delay")
+        avg_delay = sum(float(p.get("delay_minutes", 0.0)) for p in mongo_positions) / max(1, total)
+        active_alerts = await db[COLL_ALERTS].count_documents({"acknowledged": False})
+        accuracy = max(70, 95 - avg_delay * 0.5)
 
-            # Count active alerts
-            alerts_result = await session.execute(
-                select(func.count()).select_from(Alert).where(Alert.acknowledged == False)
-            )
-            active_alerts = alerts_result.scalar() or 0
-
-            # Prediction accuracy (simulated)
-            accuracy = max(70, 95 - avg_delay * 0.5)
-
-            return {
-                "active_trains": total,
-                "on_time": on_time,
-                "delayed": delayed,
-                "critical": critical,
-                "avg_delay_minutes": round(avg_delay, 1),
-                "prediction_accuracy": round(accuracy, 1),
-                "active_alerts": active_alerts,
-            }
+        return {
+            "active_trains": total,
+            "on_time": on_time,
+            "delayed": delayed,
+            "critical": critical,
+            "avg_delay_minutes": round(avg_delay, 1),
+            "prediction_accuracy": round(accuracy, 1),
+            "active_alerts": active_alerts,
+        }
 
 
 # Singleton

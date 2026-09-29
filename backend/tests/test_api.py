@@ -3,31 +3,28 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
-from app.database.db import init_db
-from app.database.seed import seed_db
-from app.database.seed_users import seed_demo_users
 from app.services.eta_service import eta_service
 from ml.predict import ETAPredictor
 
 
 @pytest.fixture
 async def client():
-    await init_db()
-    await seed_db()
-    await seed_demo_users()
+    from app.database.mongodb import init_mongo, get_mongo_db
+    if get_mongo_db() is None:
+        await init_mongo()
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="https://test") as ac:
         yield ac
 
 
 @pytest.fixture
 async def staff_client():
     """Client authenticated as RAILWAY_STAFF for protected endpoint tests."""
-    await init_db()
-    await seed_db()
-    await seed_demo_users()
+    from app.database.mongodb import init_mongo, get_mongo_db
+    if get_mongo_db() is None:
+        await init_mongo()
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="https://test") as ac:
         # Login as staff to get auth cookie
         login_resp = await ac.post("/api/auth/login", json={
             "phone": "9876543211",
@@ -475,7 +472,6 @@ async def test_importer_generalization_idempotency_and_malformed_isolation(tmp_p
     """Test importer discovers files, skips malformed JSON cleanly, and is idempotent without duplicate stops."""
     import json
     import os
-    from app.database.db import async_session_maker
     from app.models.database_models import RealTrain, RealTrainStop
     from sqlalchemy import select, func
     from scripts.import_real_train_data import import_trains_from_directory
@@ -528,8 +524,16 @@ async def test_importer_generalization_idempotency_and_malformed_isolation(tmp_p
     malformed_file = temp_dir / "train_corrupt.json"
     malformed_file.write_text("{ corrupt json ... not valid", encoding="utf-8")
 
-    # Run import on temp directory
-    async with async_session_maker() as session:
+    # Create isolated in-memory test database so no persistent SQLite file is accessed
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from app.database.db import Base
+    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    TestSession = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Run import on temp directory using isolated in-memory session
+    async with TestSession() as session:
         result = await import_trains_from_directory(session, str(temp_dir), batch_size=10)
         assert result["total_files"] == 2
         assert result["imported"] == 1
@@ -557,11 +561,7 @@ async def test_importer_generalization_idempotency_and_malformed_isolation(tmp_p
         stops_after = stops_res_after.scalars().all()
         assert len(stops_after) == 2
 
-        # Clean up test 99001 to keep master catalog count exact
-        from sqlalchemy import delete
-        await session.execute(delete(RealTrainStop).where(RealTrainStop.train_number == "99001"))
-        await session.execute(delete(RealTrain).where(RealTrain.train_number == "99001"))
-        await session.commit()
+    await test_engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -569,7 +569,6 @@ async def test_importer_batch_performance_benchmark(tmp_path):
     """Benchmark: Verify importer handles batch ingestion of 100 train records cleanly."""
     import json
     import time
-    from app.database.db import async_session_maker
     from scripts.import_real_train_data import import_trains_from_directory
 
     bench_dir = tmp_path / "bench_feeds"
@@ -615,8 +614,16 @@ async def test_importer_batch_performance_benchmark(tmp_path):
         }
         (bench_dir / f"train_{t_num}.json").write_text(json.dumps(t_data), encoding="utf-8")
 
+    # Create isolated in-memory test database so no persistent SQLite file is accessed
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from app.database.db import Base
+    test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    TestSession = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
     start_time = time.perf_counter()
-    async with async_session_maker() as session:
+    async with TestSession() as session:
         res = await import_trains_from_directory(session, str(bench_dir), batch_size=50)
     elapsed = time.perf_counter() - start_time
 
@@ -624,14 +631,7 @@ async def test_importer_batch_performance_benchmark(tmp_path):
     assert res["skipped"] == 0
     # Ingestion of 100 trains with stops in batches should take under 5 seconds in SQLite
     assert elapsed < 5.0
-
-    # Clean up benchmark test records from database so catalog remains clean
-    from sqlalchemy import delete
-    from app.models.database_models import RealTrain, RealTrainStop
-    async with async_session_maker() as session:
-        await session.execute(delete(RealTrainStop).where(RealTrainStop.train_number.like("88%")))
-        await session.execute(delete(RealTrain).where(RealTrain.train_number.like("88%")))
-        await session.commit()
+    await test_engine.dispose()
 
 
 @pytest.mark.asyncio

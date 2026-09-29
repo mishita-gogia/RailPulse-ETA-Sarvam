@@ -11,11 +11,9 @@ from contextlib import asynccontextmanager
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from app.config import settings
-from app.database.db import init_db
-from app.database.seed import seed_db
+from app.database.mongodb import init_mongo, close_mongo
 from app.simulation.engine import simulation_engine
 from app.services.eta_service import eta_service
-from app.models.user_model import User  # noqa: F401 — ensure users table is created
 from app.api import trains, simulation, network, alerts, analytics, websocket, auth, sarvam
 
 
@@ -28,18 +26,11 @@ async def lifespan(app: FastAPI):
     print(f"  DEMO MODE: {'ON' if settings.DEMO_MODE else 'OFF'}")
     print(f"{'='*60}\n")
 
-    # Initialize database
-    await init_db()
-    print("[Startup] Database initialized.")
-
-    # Load seed data
-    await seed_db()
-    print("[Startup] Seed data loaded.")
-
-    # Seed demo users (idempotent)
-    from app.database.seed_users import seed_demo_users
-    await seed_demo_users()
-    print("[Startup] Demo users ready.")
+    # Initialize MongoDB (AsyncMongoClient)
+    mongo_ok = await init_mongo()
+    if not mongo_ok:
+        raise RuntimeError("MongoDB connection failed. RailPulse requires an active MongoDB connection.")
+    print("[Startup] MongoDB connected successfully.")
 
     # Set ML predictor on simulation engine
     if eta_service.predictor:
@@ -58,6 +49,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     await simulation_engine.stop()
     print("[Shutdown] Simulation engine stopped.")
+    await close_mongo()
+    print("[Shutdown] MongoDB connection closed.")
 
 
 app = FastAPI(

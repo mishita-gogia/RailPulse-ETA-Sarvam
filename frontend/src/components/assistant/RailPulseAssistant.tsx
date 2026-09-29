@@ -8,8 +8,38 @@ interface Message {
   text: string;
   trainNumber?: string | null;
   audioBase64?: string | null;
+  localizedText?: string | null;
   timestamp: string;
 }
+
+const TTS_LANGUAGES = [
+  { code: 'hi-IN', label: 'Hindi (hi-IN)' },
+  { code: 'en-IN', label: 'English (en-IN)' },
+  { code: 'bn-IN', label: 'Bengali (bn-IN)' },
+  { code: 'gu-IN', label: 'Gujarati (gu-IN)' },
+  { code: 'kn-IN', label: 'Kannada (kn-IN)' },
+  { code: 'ml-IN', label: 'Malayalam (ml-IN)' },
+  { code: 'mr-IN', label: 'Marathi (mr-IN)' },
+  { code: 'od-IN', label: 'Odia (od-IN)' },
+  { code: 'pa-IN', label: 'Punjabi (pa-IN)' },
+  { code: 'ta-IN', label: 'Tamil (ta-IN)' },
+  { code: 'te-IN', label: 'Telugu (te-IN)' },
+];
+
+const STT_LANGUAGES = [
+  { code: 'unknown', label: 'Auto-Detect' },
+  { code: 'hi-IN', label: 'Hindi (hi-IN)' },
+  { code: 'en-IN', label: 'English (en-IN)' },
+  { code: 'bn-IN', label: 'Bengali (bn-IN)' },
+  { code: 'gu-IN', label: 'Gujarati (gu-IN)' },
+  { code: 'kn-IN', label: 'Kannada (kn-IN)' },
+  { code: 'ml-IN', label: 'Malayalam (ml-IN)' },
+  { code: 'mr-IN', label: 'Marathi (mr-IN)' },
+  { code: 'od-IN', label: 'Odia (od-IN)' },
+  { code: 'pa-IN', label: 'Punjabi (pa-IN)' },
+  { code: 'ta-IN', label: 'Tamil (ta-IN)' },
+  { code: 'te-IN', label: 'Telugu (te-IN)' },
+];
 
 export const RailPulseAssistant: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
@@ -25,6 +55,8 @@ export const RailPulseAssistant: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [audioPlayingId, setAudioPlayingId] = useState<string | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [voiceLanguage, setVoiceLanguage] = useState('hi-IN');
+  const [inputLanguage, setInputLanguage] = useState('unknown');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -38,6 +70,36 @@ export const RailPulseAssistant: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
+
+  const playAudio = async (audioB64: string, msgId: string) => {
+    try {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
+
+      const audio = new Audio(`data:audio/mp3;base64,${audioB64}`);
+      currentAudioRef.current = audio;
+      setAudioPlayingId(msgId);
+
+      audio.onended = () => {
+        setAudioPlayingId(null);
+        currentAudioRef.current = null;
+      };
+
+      audio.onerror = () => {
+        setAudioPlayingId(null);
+        currentAudioRef.current = null;
+      };
+
+      await audio.play();
+    } catch (err) {
+      // Browser autoplay restriction or interruption handled gracefully
+      console.warn('Audio playback restricted or interrupted by browser policy:', err);
+      setAudioPlayingId(null);
+      currentAudioRef.current = null;
+    }
+  };
 
   const handleSend = async (textToSend?: string) => {
     const query = (textToSend || input).trim();
@@ -57,15 +119,37 @@ export const RailPulseAssistant: React.FC = () => {
 
     try {
       const data = await askSarvamAssistant(query);
+      const assistantId = `a-${Date.now()}`;
+      let audioB64: string | null = data.audio_base64 || null;
+      let locText: string | null = data.localized_text || null;
+
+      // Auto TTS: Generate speech for assistant response using selected Voice Language
+      // (Backend /sarvam/tts handles translating to voiceLanguage before synthesizing)
+      if (!audioB64 && data.response) {
+        try {
+          const ttsRes = await getSarvamTTS(data.response, voiceLanguage);
+          audioB64 = ttsRes.audio_base64 || null;
+          locText = ttsRes.localized_text || null;
+        } catch (ttsErr) {
+          console.warn('Auto TTS generation error:', ttsErr);
+        }
+      }
+
       const assistantMsg: Message = {
-        id: `a-${Date.now()}`,
+        id: assistantId,
         sender: 'assistant',
         text: data.response,
         trainNumber: data.train_number,
-        audioBase64: data.audio_base64,
+        audioBase64: audioB64,
+        localizedText: locText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages(prev => [...prev, assistantMsg]);
+
+      // Automatically speak the response
+      if (audioB64) {
+        playAudio(audioB64, assistantId);
+      }
     } catch (err: any) {
       const errorMsg: Message = {
         id: `err-${Date.now()}`,
@@ -91,28 +175,24 @@ export const RailPulseAssistant: React.FC = () => {
       }
 
       let audioB64 = msg.audioBase64;
+      // If audio is not cached, fetch it once using the selected voice language and cache it
       if (!audioB64) {
         setLoading(true);
-        const ttsRes = await getSarvamTTS(msg.text, 'hi-IN');
+        const ttsRes = await getSarvamTTS(msg.text, voiceLanguage);
         audioB64 = ttsRes.audio_base64;
         msg.audioBase64 = audioB64;
+        msg.localizedText = ttsRes.localized_text || null;
         setLoading(false);
       }
 
       if (audioB64) {
-        const audio = new Audio(`data:audio/mp3;base64,${audioB64}`);
-        currentAudioRef.current = audio;
-        setAudioPlayingId(msg.id);
-        audio.onended = () => setAudioPlayingId(null);
-        audio.onerror = () => {
-          setAudioPlayingId(null);
-          setAudioError('Unable to play audio stream');
-        };
-        await audio.play();
+        await playAudio(audioB64, msg.id);
       }
     } catch (e) {
       setAudioPlayingId(null);
       setAudioError('Text-to-speech is currently unavailable');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -142,16 +222,37 @@ export const RailPulseAssistant: React.FC = () => {
         if (audioBlob.size > 0) {
           setLoading(true);
           try {
-            const result = await sendSarvamAudioSTT(audioBlob);
+            // Pass inputLanguage (STT) and voiceLanguage (TTS)
+            const result = await sendSarvamAudioSTT(audioBlob, inputLanguage, voiceLanguage);
+            const assistantId = `a-${Date.now()}`;
+            let audioB64: string | null = result.audio_base64 || null;
+            let locText: string | null = result.localized_text || null;
+
+            // If backend STT did not synthesize audio, generate it via TTS
+            if (!audioB64 && result.response) {
+              try {
+                const ttsRes = await getSarvamTTS(result.response, voiceLanguage);
+                audioB64 = ttsRes.audio_base64 || null;
+                locText = ttsRes.localized_text || null;
+              } catch (ttsErr) {
+                console.warn('Voice Auto TTS generation error:', ttsErr);
+              }
+            }
+
             const assistantMsg: Message = {
-              id: `a-${Date.now()}`,
+              id: assistantId,
               sender: 'assistant',
               text: result.response,
               trainNumber: result.train_number,
-              audioBase64: result.audio_base64,
+              audioBase64: audioB64,
+              localizedText: locText,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             };
             setMessages(prev => [...prev, assistantMsg]);
+
+            if (audioB64) {
+              playAudio(audioB64, assistantId);
+            }
           } catch {
             setAudioError('Could not process speech. Please type your query.');
           } finally {
@@ -183,7 +284,7 @@ export const RailPulseAssistant: React.FC = () => {
   ];
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col h-[580px] overflow-hidden">
+    <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col h-[620px] overflow-hidden">
       {/* Header */}
       <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -202,6 +303,45 @@ export const RailPulseAssistant: React.FC = () => {
         </div>
         <div className="text-right">
           <span className="text-[11px] text-slate-500 font-medium">Source: RailPulse Engine</span>
+        </div>
+      </div>
+
+      {/* Language Selectors Bar */}
+      <div className="px-5 py-2.5 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <Volume2 className="w-3.5 h-3.5 text-slate-500" />
+            <label htmlFor="voice-lang-select" className="font-semibold text-slate-700">
+              Assistant Voice Language:
+            </label>
+            <select
+              id="voice-lang-select"
+              value={voiceLanguage}
+              onChange={(e) => setVoiceLanguage(e.target.value)}
+              className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs text-slate-800 focus:outline-none focus:border-red-500 shadow-sm"
+            >
+              {TTS_LANGUAGES.map(lang => (
+                <option key={lang.code} value={lang.code}>{lang.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <Mic className="w-3.5 h-3.5 text-slate-500" />
+            <label htmlFor="input-lang-select" className="font-semibold text-slate-700">
+              My Input Language:
+            </label>
+            <select
+              id="input-lang-select"
+              value={inputLanguage}
+              onChange={(e) => setInputLanguage(e.target.value)}
+              className="bg-white border border-slate-300 rounded-md px-2 py-1 text-xs text-slate-800 focus:outline-none focus:border-red-500 shadow-sm"
+            >
+              {STT_LANGUAGES.map(lang => (
+                <option key={lang.code} value={lang.code}>{lang.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -230,7 +370,13 @@ export const RailPulseAssistant: React.FC = () => {
                     : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none'
                 }`}
               >
-                {msg.text}
+                <div>{msg.text}</div>
+                {msg.localizedText && msg.localizedText !== msg.text && (
+                  <div className="mt-2.5 pt-2 border-t border-slate-100 text-slate-600 text-xs flex items-start gap-1.5 bg-slate-50 p-2 rounded-lg">
+                    <Volume2 className="w-3.5 h-3.5 mt-0.5 text-red-600 shrink-0" />
+                    <span className="font-normal">{msg.localizedText}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 mt-1 px-1">
@@ -244,10 +390,10 @@ export const RailPulseAssistant: React.FC = () => {
                         ? 'bg-red-100 text-red-700'
                         : 'text-slate-500 hover:text-red-600 hover:bg-slate-100'
                     }`}
-                    title="Listen to audio response"
+                    title={audioPlayingId === msg.id ? 'Pause audio' : (msg.audioBase64 ? 'Replay audio' : 'Listen to audio')}
                   >
                     <Volume2 className={`w-3 h-3 ${audioPlayingId === msg.id ? 'animate-pulse' : ''}`} />
-                    <span>{audioPlayingId === msg.id ? 'Playing...' : 'Listen'}</span>
+                    <span>{audioPlayingId === msg.id ? 'Playing...' : (msg.audioBase64 ? 'Replay' : 'Listen')}</span>
                   </button>
                 )}
 

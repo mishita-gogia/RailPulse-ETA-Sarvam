@@ -9,13 +9,10 @@ import {
   ChevronRight,
   Navigation,
   Radio,
-  Bot,
-  Sparkles,
 } from 'lucide-react';
 import * as api from '../services/api';
 import { wsService } from '../services/websocket';
 import { ETAPrediction } from '../types';
-import { RailPulseAssistant } from '../components/assistant/RailPulseAssistant';
 
 const PassengerView = () => {
   const [search, setSearch] = useState('');
@@ -24,7 +21,6 @@ const PassengerView = () => {
   const [eta, setEta] = useState<ETAPrediction[]>([]);
   const [route, setRoute] = useState<any[]>([]);
   const [lastUpdate, setLastUpdate] = useState(0);
-  const [showAssistant, setShowAssistant] = useState(true);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,41 +260,6 @@ const PassengerView = () => {
             22436 · Vande Bharat
           </button>
         </div>
-      </div>
-
-      {/* SARVAM ASSISTANT PANEL */}
-      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 border border-red-200 text-red-700">
-              <Bot className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-slate-900 text-base">RailPulse AI Assistant</h3>
-                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 px-2 py-0.5 text-[10px] font-bold text-red-700">
-                  <Sparkles className="h-3 w-3" /> Sarvam AI
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">
-                Natural-language train tracking in English, Hindi, and Hinglish
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowAssistant(!showAssistant)}
-            className="self-start sm:self-auto rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
-          >
-            {showAssistant ? 'Hide Assistant' : 'Open Assistant'}
-          </button>
-        </div>
-
-        {showAssistant && (
-          <div className="mt-4 pt-4 border-t border-slate-100">
-            <RailPulseAssistant />
-          </div>
-        )}
       </div>
 
       {/* EMPTY STATE */}

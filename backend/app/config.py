@@ -11,11 +11,9 @@ class Settings:
     VERSION: str = "1.0.0"
     DESCRIPTION: str = "AI-Powered Dynamic Train Arrival Forecasting System"
 
-    # Database
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "sqlite+aiosqlite:///./railpulse.db"
-    )
+    # MongoDB Atlas (AsyncMongoClient)
+    MONGODB_URL: str | None = os.getenv("MONGODB_URL")
+    MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "railpulse")
 
     # Simulation
     SIMULATION_INTERVAL: int = int(os.getenv("SIMULATION_INTERVAL", "3"))

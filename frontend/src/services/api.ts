@@ -7,9 +7,29 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
+let inMemoryToken: string | null = null;
+
+export const setAuthToken = (token: string | null) => {
+  inMemoryToken = token;
+  if (token) {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    delete api.defaults.headers.common['Authorization'];
+  }
+};
+
+export const getAuthToken = () => inMemoryToken;
+
 const api = axios.create({
   baseURL: API_BASE,
   withCredentials: true,
+});
+
+api.interceptors.request.use((config) => {
+  if (inMemoryToken && !config.headers['Authorization']) {
+    config.headers['Authorization'] = `Bearer ${inMemoryToken}`;
+  }
+  return config;
 });
 
 export const getHealth = () => api.get('/health').then(res => res.data);
@@ -79,17 +99,38 @@ export interface SarvamChatResponse {
   train_number?: string | null;
   source: string;
   audio_base64?: string | null;
+  localized_text?: string | null;
 }
 
 export const askSarvamAssistant = (message: string, language: string = "auto"): Promise<SarvamChatResponse> =>
   api.post<SarvamChatResponse>('/sarvam/chat', { message, language }).then(res => res.data);
 
-export const getSarvamTTS = (text: string, language_code: string = "hi-IN"): Promise<{ audio_base64: string; format: string }> =>
+export const getSarvamTTS = (
+  text: string,
+  language_code: string = "hi-IN"
+): Promise<{ audio_base64: string; format: string; localized_text?: string | null }> =>
   api.post('/sarvam/tts', { text, language_code }).then(res => res.data);
 
-export const sendSarvamAudioSTT = (audioBlob: Blob): Promise<SarvamChatResponse> => {
+export const translateSarvamText = (
+  text: string,
+  target_language_code: string,
+  source_language_code: string = "auto"
+): Promise<{ translated_text: string; target_language_code: string }> =>
+  api.post('/sarvam/translate', { text, target_language_code, source_language_code }).then(res => res.data);
+
+export const sendSarvamAudioSTT = (
+  audioBlob: Blob,
+  language_code: string = "unknown",
+  tts_language_code?: string
+): Promise<SarvamChatResponse> => {
   const formData = new FormData();
   formData.append('file', audioBlob, 'speech.wav');
+  if (language_code) {
+    formData.append('language_code', language_code);
+  }
+  if (tts_language_code) {
+    formData.append('tts_language_code', tts_language_code);
+  }
   return api.post<SarvamChatResponse>('/sarvam/stt', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }).then(res => res.data);

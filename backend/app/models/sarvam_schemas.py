@@ -15,6 +15,7 @@ class SarvamChatResponse(BaseModel):
     train_number: Optional[str] = Field(None, description="Identified train number if applicable")
     source: str = Field("railpulse", description="Authoritative data source (railpulse)")
     audio_base64: Optional[str] = Field(None, description="Optional base64-encoded audio for text-to-speech")
+    localized_text: Optional[str] = Field(None, description="Optional localized/translated speech text")
 
 
 class SarvamTTSRequest(BaseModel):
@@ -25,3 +26,15 @@ class SarvamTTSRequest(BaseModel):
 class SarvamTTSResponse(BaseModel):
     audio_base64: str = Field(..., description="Base64 encoded audio string")
     format: str = Field("mp3", description="Audio format")
+    localized_text: Optional[str] = Field(None, description="Optional localized/translated speech text")
+
+
+class SarvamTranslateRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1500, description="Text to translate")
+    target_language_code: str = Field(..., description="Target language BCP-47 code (e.g. 'hi-IN')")
+    source_language_code: Optional[str] = Field("auto", description="Source language BCP-47 code or 'auto'")
+
+
+class SarvamTranslateResponse(BaseModel):
+    translated_text: str = Field(..., description="Translated text")
+    target_language_code: str = Field(..., description="Target language BCP-47 code")
