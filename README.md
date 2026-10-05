@@ -408,7 +408,7 @@ The current prototype keeps these integrations decoupled from the core ETA engin
 
 ## 📄 License / Attribution
 
-RailPulse ETA is a Smart India Hackathon 2026 prototype by **Team HazardIQ (SIH27)**.
+RailPulse ETA is a Smart India Hackathon 2026 prototype by **Team HazardIQ (Team ID: 134807)**.
 
 Railway reference data used in the project is attributed to its respective public sources, including DataMeet and the Government Open Government Data Platform.
 
